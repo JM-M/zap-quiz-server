@@ -53,17 +53,16 @@ export class GameService {
     this.logger.log(`Looking up game with code: ${code}`);
 
     try {
-      const result = await db
+      const [game] = await db
         .select()
         .from(games)
         .where(eq(games.code, code))
         .limit(1);
 
-      if (result.length === 0) {
+      if (!game) {
         return null;
       }
 
-      const game = result[0];
       return {
         id: game.id,
         code: game.code,
