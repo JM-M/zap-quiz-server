@@ -94,20 +94,19 @@ export class GameService {
 
     try {
       // 1. Check if game exists and is joinable
-      const gameResult = await db
+      const [game] = await db
         .select()
         .from(games)
         .where(eq(games.id, gameId))
         .limit(1);
 
-      if (gameResult.length === 0) {
+      if (!game) {
         return {
           success: false,
           error: 'Game not found',
         };
       }
 
-      const game = gameResult[0];
       if (game.status !== 'waiting') {
         return {
           success: false,
@@ -116,7 +115,7 @@ export class GameService {
       }
 
       // 2. Check if user is already in the game
-      const existingPlayer = await db
+      const [existingPlayer] = await db
         .select()
         .from(players)
         .where(
@@ -128,35 +127,33 @@ export class GameService {
         )
         .limit(1);
 
-      if (existingPlayer.length > 0) {
+      if (existingPlayer) {
         return {
           success: true,
           player: {
-            id: existingPlayer[0].id,
-            gameId: existingPlayer[0].gameId,
-            name: existingPlayer[0].name,
-            userId: existingPlayer[0].userId,
-            isHost: existingPlayer[0].isHost,
-            joinedAt: existingPlayer[0].joinedAt,
-            leftAt: existingPlayer[0].leftAt || undefined,
-            isActive: existingPlayer[0].isActive,
+            id: existingPlayer.id,
+            gameId: existingPlayer.gameId,
+            name: existingPlayer.name,
+            userId: existingPlayer.userId,
+            isHost: existingPlayer.isHost,
+            joinedAt: existingPlayer.joinedAt,
+            leftAt: existingPlayer.leftAt || undefined,
+            isActive: existingPlayer.isActive,
           },
         };
       }
 
       // 3. Create player record
-      const newPlayer = await db
+      const [player] = await db
         .insert(players)
         .values({
           gameId,
           name: playerName,
           userId,
-          isHost: false,
+          isHost: game.hostId === userId,
           isActive: true,
         })
         .returning();
-
-      const player = newPlayer[0];
 
       return {
         success: true,
@@ -268,7 +265,7 @@ export class GameService {
 
     try {
       // 1. Get question and option details
-      const [questionResult, optionResult] = await Promise.all([
+      const [[question], [option]] = await Promise.all([
         db
           .select()
           .from(questions)
@@ -281,7 +278,7 @@ export class GameService {
           .limit(1),
       ]);
 
-      if (questionResult.length === 0 || optionResult.length === 0) {
+      if (!question || !option) {
         return {
           success: false,
           isCorrect: false,
@@ -289,8 +286,6 @@ export class GameService {
         };
       }
 
-      const question = questionResult[0];
-      const option = optionResult[0];
       const isCorrect = option.isCorrect;
       const points = isCorrect ? question.points : 0;
 

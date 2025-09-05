@@ -15,7 +15,7 @@ import { GameService } from '../services/game.service';
 interface JoinGameData {
   gameCode: string;
   playerName: string;
-  userId?: string;
+  userId: string;
 }
 
 interface LeaveGameData {
@@ -47,6 +47,17 @@ interface LeaveLobbyData {
   playerId: string;
 }
 
+interface StartCountdownData {
+  gameId: string;
+  duration: number; // in seconds
+}
+
+interface CountdownTickData {
+  gameId: string;
+  currentNumber: number;
+  remainingTime: number; // milliseconds remaining
+}
+
 @WebSocketGateway({
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
@@ -63,6 +74,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     string,
     { socket: Socket; gameId?: string; playerId?: string }
   >();
+
+  private countdownTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly gameService: GameService) {}
 
@@ -81,6 +94,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: clientData.playerId,
         gameId: clientData.gameId,
       });
+
+      // Clean up countdown if no more players in the game
+      const connectedPlayers = this.getConnectedPlayers(clientData.gameId);
+      if (connectedPlayers.length <= 1) {
+        this.clearCountdown(clientData.gameId);
+      }
     }
 
     this.connectedClients.delete(client.id);
@@ -115,7 +134,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const result = await this.gameService.addPlayerToGame(
         game.id,
         data.playerName,
-        data.userId || `user-${Date.now()}`,
+        data.userId,
       );
 
       if (!result.success) {
@@ -403,6 +422,39 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('START_COUNTDOWN')
+  async handleStartCountdown(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: StartCountdownData,
+  ) {
+    try {
+      this.logger.log(`Starting countdown for game ${data.gameId}`);
+
+      // Clear any existing countdown for this game
+      this.clearCountdown(data.gameId);
+
+      // Start new countdown
+      this.startCountdown(data.gameId, data.duration);
+    } catch (error) {
+      this.logger.error('Error starting countdown:', error);
+      client.emit('ERROR', { message: 'Failed to start countdown' });
+    }
+  }
+
+  @SubscribeMessage('STOP_COUNTDOWN')
+  async handleStopCountdown(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { gameId: string },
+  ) {
+    try {
+      this.logger.log(`Stopping countdown for game ${data.gameId}`);
+      this.clearCountdown(data.gameId);
+    } catch (error) {
+      this.logger.error('Error stopping countdown:', error);
+      client.emit('ERROR', { message: 'Failed to stop countdown' });
+    }
+  }
+
   // Helper method to get room name
   private getRoomName(gameId: string): string {
     return `game-${gameId}`;
@@ -415,9 +467,73 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Helper method to get connected players in a game
   public getConnectedPlayers(gameId: string): string[] {
-    const room = this.server.sockets.adapter.rooms.get(
-      this.getRoomName(gameId),
-    );
-    return room ? Array.from(room) : [];
+    try {
+      // Check if server, sockets, adapter, and rooms are all available
+      if (!this.server?.sockets?.adapter?.rooms) {
+        this.logger.warn('Socket.IO adapter rooms not available');
+        return [];
+      }
+
+      const room = this.server.sockets.adapter.rooms.get(
+        this.getRoomName(gameId),
+      );
+      return room ? Array.from(room) : [];
+    } catch (error) {
+      this.logger.error('Error getting connected players:', error);
+      return [];
+    }
+  }
+
+  // Countdown management methods
+  private startCountdown(gameId: string, duration: number) {
+    const startTime = Date.now();
+    const endTime = startTime + duration * 1000;
+
+    // Send initial countdown start event
+    this.server.to(this.getRoomName(gameId)).emit('COUNTDOWN_START', {
+      gameId,
+      duration,
+      startTime,
+      endTime,
+    });
+
+    // Set up interval to send countdown ticks
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const remainingTime = Math.max(0, endTime - now);
+      const currentNumber = Math.ceil(remainingTime / 1000);
+
+      if (remainingTime <= 0) {
+        // Countdown finished
+        this.server.to(this.getRoomName(gameId)).emit('COUNTDOWN_END', {
+          gameId,
+        });
+        this.clearCountdown(gameId);
+        return;
+      }
+
+      // Send countdown tick
+      this.server.to(this.getRoomName(gameId)).emit('COUNTDOWN_TICK', {
+        gameId,
+        currentNumber,
+        remainingTime,
+      });
+    }, 1000); // TODO: Improve this with one or more of the suggestions below
+    /*
+    Client-side interpolation: Send 1-second server updates but animate smoothly on the client
+    Hybrid approach: Server sends 1-second updates, client handles sub-second visual updates
+    Progressive timing: Start with 1-second intervals, then switch to 100ms only for the final second
+    */
+
+    // Store the interval ID
+    this.countdownTimers.set(gameId, interval);
+  }
+
+  private clearCountdown(gameId: string) {
+    const timer = this.countdownTimers.get(gameId);
+    if (timer) {
+      clearInterval(timer);
+      this.countdownTimers.delete(gameId);
+    }
   }
 }
