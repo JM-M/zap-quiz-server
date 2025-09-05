@@ -68,7 +68,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
-    console.log('🔌 Client connected:', client.id);
     this.connectedClients.set(client.id, { socket: client });
   }
 
@@ -278,7 +277,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.log(
         `Player ${data.playerName} joining lobby for game ${data.gameCode}`,
       );
-      console.log('🎮 JOIN_LOBBY received:', data);
 
       // Find the game by code
       const game = await this.gameService.findGameByCode(data.gameCode);
