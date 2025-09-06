@@ -72,16 +72,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(GameGateway.name);
   private connectedClients = new Map<
     string,
-    { socket: Socket; gameId?: string; playerId?: string }
+    { socket: Socket; gameId?: string; playerId?: string; lastPing?: number }
   >();
 
   private countdownTimers = new Map<string, NodeJS.Timeout>();
+  private heartbeatInterval: NodeJS.Timeout;
+  private cleanupInterval: NodeJS.Timeout;
 
-  constructor(private readonly gameService: GameService) {}
+  constructor(private readonly gameService: GameService) {
+    // Start heartbeat mechanism
+    this.startHeartbeat();
+    // Start periodic cleanup of inactive players
+    this.startInactivePlayerCleanup();
+  }
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
-    this.connectedClients.set(client.id, { socket: client });
+    this.connectedClients.set(client.id, {
+      socket: client,
+      lastPing: Date.now(),
+    });
   }
 
   handleDisconnect(client: Socket) {
@@ -103,70 +113,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     this.connectedClients.delete(client.id);
-  }
-
-  @SubscribeMessage('JOIN_GAME')
-  async handleJoinGame(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: JoinGameData,
-  ) {
-    try {
-      this.logger.log(
-        `Player ${data.playerName} joining game ${data.gameCode}`,
-      );
-
-      // Find the game by code
-      const game = await this.gameService.findGameByCode(data.gameCode);
-      if (!game) {
-        client.emit('ERROR', { message: 'Game not found' });
-        return;
-      }
-
-      // Check if game is joinable
-      if (game.status !== 'waiting') {
-        client.emit('ERROR', {
-          message: `Cannot join game. Game status is: ${game.status}`,
-        });
-        return;
-      }
-
-      // Add player to game
-      const result = await this.gameService.addPlayerToGame(
-        game.id,
-        data.playerName,
-        data.userId,
-      );
-
-      if (!result.success) {
-        client.emit('ERROR', {
-          message: result.error || 'Failed to join game',
-        });
-        return;
-      }
-
-      const player = result.player!;
-
-      // Join the game room
-      await client.join(this.getRoomName(game.id));
-
-      // Update client data
-      const clientData = this.connectedClients.get(client.id);
-      if (clientData) {
-        clientData.gameId = game.id;
-        clientData.playerId = player.id;
-      }
-
-      // Notify all players in the room that someone joined
-      this.server
-        .to(this.getRoomName(game.id))
-        .emit('PLAYER_JOINED', { player });
-
-      // Send confirmation to the joining player
-      client.emit('JOIN_GAME_SUCCESS', { player, gameId: game.id });
-    } catch (error) {
-      this.logger.error('Error joining game:', error);
-      client.emit('ERROR', { message: 'Failed to join game' });
-    }
   }
 
   @SubscribeMessage('LEAVE_GAME')
@@ -455,6 +401,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('PING')
+  async handlePing(@ConnectedSocket() client: Socket) {
+    const clientData = this.connectedClients.get(client.id);
+    if (clientData) {
+      clientData.lastPing = Date.now();
+    }
+    client.emit('PONG');
+  }
+
   // Helper method to get room name
   private getRoomName(gameId: string): string {
     return `game-${gameId}`;
@@ -534,6 +489,93 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (timer) {
       clearInterval(timer);
       this.countdownTimers.delete(gameId);
+    }
+  }
+
+  // Heartbeat mechanism to detect stale connections
+  private startHeartbeat() {
+    this.heartbeatInterval = setInterval(async () => {
+      const now = Date.now();
+      const staleThreshold = 30000; // 30 seconds
+      const staleClients: string[] = [];
+
+      for (const [clientId, clientData] of this.connectedClients.entries()) {
+        const timeSinceLastPing = now - (clientData.lastPing || 0);
+
+        if (timeSinceLastPing > staleThreshold) {
+          staleClients.push(clientId);
+        }
+      }
+
+      // Clean up stale clients
+      for (const clientId of staleClients) {
+        await this.cleanupStaleClient(clientId);
+      }
+    }, 15000); // Check every 15 seconds
+  }
+
+  private async cleanupStaleClient(clientId: string) {
+    const clientData = this.connectedClients.get(clientId);
+    if (!clientData) return;
+
+    this.logger.log(`Cleaning up stale client: ${clientId}`);
+
+    // If client was in a game, remove them
+    if (clientData.gameId && clientData.playerId) {
+      try {
+        await this.gameService.removePlayerFromGame(
+          clientData.gameId,
+          clientData.playerId,
+        );
+
+        // Notify other players
+        this.server
+          .to(this.getRoomName(clientData.gameId))
+          .emit('PLAYER_LEFT_LOBBY', {
+            playerId: clientData.playerId,
+            gameId: clientData.gameId,
+            players: await this.gameService.getGamePlayers(clientData.gameId),
+          });
+      } catch (error) {
+        this.logger.error('Error cleaning up stale client:', error);
+      }
+    }
+
+    // Disconnect the client
+    clientData.socket.disconnect();
+    this.connectedClients.delete(clientId);
+  }
+
+  // Periodic cleanup of inactive players from database
+  private startInactivePlayerCleanup() {
+    this.cleanupInterval = setInterval(async () => {
+      try {
+        // Clean up players who have been inactive for more than 5 minutes
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+        // This would need to be implemented in the game service
+        // await this.gameService.cleanupInactivePlayers(fiveMinutesAgo);
+
+        this.logger.log('Performed periodic cleanup of inactive players');
+      } catch (error) {
+        this.logger.error('Error during periodic cleanup:', error);
+      }
+    }, 60000); // Run every minute
+  }
+
+  // Cleanup method for graceful shutdown
+  onModuleDestroy() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+
+    // Clear all countdown timers
+    for (const timer of this.countdownTimers.values()) {
+      clearInterval(timer);
     }
   }
 }

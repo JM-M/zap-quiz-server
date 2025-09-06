@@ -22,22 +22,22 @@ This directory contains the WebSocket implementation for real-time game function
 
 | Event             | Data                                                                                               | Description                |
 | ----------------- | -------------------------------------------------------------------------------------------------- | -------------------------- |
-| `JOIN_GAME`       | `{ gameCode: string, playerName: string, userId?: string }`                                        | Join a game by code        |
-| `LEAVE_GAME`      | `{ gameId: string, playerId: string }`                                                             | Leave the current game     |
+| `JOIN_LOBBY`      | `{ gameCode: string, playerName: string, userId?: string }`                                        | Join a game lobby by code  |
+| `LEAVE_LOBBY`     | `{ gameId: string, playerId: string }`                                                             | Leave the current lobby    |
 | `START_GAME`      | `{ gameId: string, hostId: string }`                                                               | Start the game (host only) |
 | `ANSWER_QUESTION` | `{ gameId: string, playerId: string, questionId: string, optionId: string, timeToAnswer: number }` | Submit an answer           |
 
 ### Server → Client Events
 
-| Event                | Data                                                                                                 | Description                      |
-| -------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `JOIN_GAME_SUCCESS`  | `{ player: Player, gameId: string }`                                                                 | Confirmation of successful join  |
-| `LEAVE_GAME_SUCCESS` | `{ gameId: string }`                                                                                 | Confirmation of successful leave |
-| `PLAYER_JOINED`      | `{ player: Player }`                                                                                 | Another player joined the game   |
-| `PLAYER_LEFT`        | `{ playerId: string, gameId: string }`                                                               | A player left the game           |
-| `GAME_STARTED`       | `{ gameId: string, startedAt: string }`                                                              | Game has started                 |
-| `PLAYER_ANSWERED`    | `{ playerId: string, questionId: string, timeToAnswer: number, isCorrect: boolean, points: number }` | A player answered a question     |
-| `ERROR`              | `{ message: string }`                                                                                | Error occurred                   |
+| Event                 | Data                                                                                                 | Description                            |
+| --------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `LOBBY_JOINED`        | `{ player: Player, players: Player[], gameId: string }`                                              | Confirmation of successful lobby join  |
+| `LOBBY_LEFT`          | `{ gameId: string }`                                                                                 | Confirmation of successful lobby leave |
+| `PLAYER_JOINED_LOBBY` | `{ player: Player, players: Player[], gameId: string }`                                              | Another player joined the lobby        |
+| `PLAYER_LEFT_LOBBY`   | `{ playerId: string, players: Player[], gameId: string }`                                            | A player left the lobby                |
+| `GAME_STARTED`        | `{ gameId: string, startedAt: string }`                                                              | Game has started                       |
+| `PLAYER_ANSWERED`     | `{ playerId: string, questionId: string, timeToAnswer: number, isCorrect: boolean, points: number }` | A player answered a question           |
+| `ERROR`               | `{ message: string }`                                                                                | Error occurred                         |
 
 ## Integration with tRPC
 
@@ -55,16 +55,16 @@ const { data: game } = useQuery(trpc.game.getGameByCode.queryOptions({ code }));
 
 // 2. Connect to WebSocket
 useEffect(() => {
-  socket.emit('JOIN_GAME', { gameCode: code, playerName: user.name });
+  socket.emit('JOIN_LOBBY', { gameCode: code, playerName: user.name });
 }, []);
 
 // 3. Handle real-time updates
 useEffect(() => {
-  socket.on('PLAYER_JOINED', (data) => {
+  socket.on('PLAYER_JOINED_LOBBY', (data) => {
     // Update React Query cache optimistically
     queryClient.setQueryData(
-      ['game', 'getGamePlayers', { gameId: data.player.gameId }],
-      (oldPlayers) => [...(oldPlayers || []), data.player],
+      ['game', 'getGamePlayers', { gameId: data.gameId }],
+      data.players,
     );
   });
 }, []);

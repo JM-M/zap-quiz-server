@@ -35,7 +35,6 @@ export interface Player {
   isHost: boolean;
   joinedAt: Date;
   leftAt?: Date;
-  isActive: boolean;
 }
 
 export interface JoinGameResult {
@@ -118,13 +117,7 @@ export class GameService {
       const [existingPlayer] = await db
         .select()
         .from(players)
-        .where(
-          and(
-            eq(players.gameId, gameId),
-            eq(players.userId, userId),
-            eq(players.isActive, true),
-          ),
-        )
+        .where(and(eq(players.gameId, gameId), eq(players.userId, userId)))
         .limit(1);
 
       if (existingPlayer) {
@@ -138,7 +131,6 @@ export class GameService {
             isHost: existingPlayer.isHost,
             joinedAt: existingPlayer.joinedAt,
             leftAt: existingPlayer.leftAt || undefined,
-            isActive: existingPlayer.isActive,
           },
         };
       }
@@ -151,7 +143,6 @@ export class GameService {
           name: playerName,
           userId,
           isHost: game.hostId === userId,
-          isActive: true,
         })
         .returning();
 
@@ -165,7 +156,6 @@ export class GameService {
           isHost: player.isHost,
           joinedAt: player.joinedAt,
           leftAt: player.leftAt || undefined,
-          isActive: player.isActive,
         },
       };
     } catch (error) {
@@ -184,13 +174,14 @@ export class GameService {
     this.logger.log(`Removing player ${playerId} from game ${gameId}`);
 
     try {
-      // 1. Update player record to set isActive = false and set leftAt timestamp
+      // await db
+      //   .update(players)
+      //   .set({
+      //     leftAt: new Date(),
+      // })
+      // .where(and(eq(players.id, playerId), eq(players.gameId, gameId)));
       await db
-        .update(players)
-        .set({
-          isActive: false,
-          leftAt: new Date(),
-        })
+        .delete(players)
         .where(and(eq(players.id, playerId), eq(players.gameId, gameId)));
 
       return true;
@@ -235,7 +226,7 @@ export class GameService {
       const result = await db
         .select()
         .from(players)
-        .where(and(eq(players.gameId, gameId), eq(players.isActive, true)));
+        .where(and(eq(players.gameId, gameId)));
 
       return result.map((player) => ({
         id: player.id,
@@ -245,7 +236,6 @@ export class GameService {
         isHost: player.isHost,
         joinedAt: player.joinedAt,
         leftAt: player.leftAt || undefined,
-        isActive: player.isActive,
       }));
     } catch (error) {
       this.logger.error('Error getting game players:', error);

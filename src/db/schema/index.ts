@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { user } from './auth';
@@ -97,12 +98,11 @@ export const players = pgTable(
     isHost: boolean('is_host').notNull().default(false),
     joinedAt: timestamp('joined_at').notNull().defaultNow(),
     leftAt: timestamp('left_at'),
-    isActive: boolean('is_active').notNull().default(true),
   },
   (table) => [
     index('idx_players_game_id').on(table.gameId),
-    index('idx_players_game_active').on(table.gameId, table.isActive),
     index('idx_players_user_id').on(table.userId),
+    unique('unique_player_per_game').on(table.gameId, table.userId),
   ],
 );
 
