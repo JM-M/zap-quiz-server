@@ -20,7 +20,7 @@ export interface Game {
   updatedAt: Date;
   startedAt?: Date;
   completedAt?: Date;
-  currentScreen: 'countdown' | 'quiz' | 'leaderboard';
+  currentScreen: 'countdown' | 'quiz' | 'leaderboard' | 'scores';
   currentQuestionIndex: number;
   settings?: {
     timeLimit?: number;
@@ -81,7 +81,8 @@ export class GameService {
         currentScreen: game.currentScreen as
           | 'countdown'
           | 'quiz'
-          | 'leaderboard',
+          | 'leaderboard'
+          | 'scores',
         currentQuestionIndex: game.currentQuestionIndex,
         settings: game.settings || undefined,
       };
@@ -333,7 +334,7 @@ export class GameService {
 
   async updateGameScreen(
     gameId: string,
-    screen: 'countdown' | 'quiz' | 'leaderboard',
+    screen: 'countdown' | 'quiz' | 'leaderboard' | 'scores',
   ): Promise<boolean> {
     this.logger.log(`Updating game ${gameId} screen to ${screen}`);
 
@@ -379,7 +380,7 @@ export class GameService {
 
   async updateGameState(
     gameId: string,
-    screen: 'countdown' | 'quiz' | 'leaderboard',
+    screen: 'countdown' | 'quiz' | 'leaderboard' | 'scores',
     questionIndex: number,
   ): Promise<boolean> {
     this.logger.log(

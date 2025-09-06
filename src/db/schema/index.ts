@@ -32,7 +32,7 @@ export const games = pgTable(
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
     currentScreen: text('current_screen', {
-      enum: ['countdown', 'quiz', 'leaderboard'],
+      enum: ['countdown', 'quiz', 'leaderboard', 'scores'],
     })
       .notNull()
       .default('countdown'),
