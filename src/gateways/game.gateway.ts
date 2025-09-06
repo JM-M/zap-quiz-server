@@ -74,6 +74,12 @@ interface UpdateGameStateData {
   questionIndex: number;
 }
 
+interface PlayerAnsweredData {
+  gameId: string;
+  playerId: string;
+  questionId: string;
+}
+
 @WebSocketGateway({
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
@@ -94,6 +100,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private countdownTimers = new Map<string, NodeJS.Timeout>();
   private heartbeatInterval: NodeJS.Timeout;
   private cleanupInterval: NodeJS.Timeout;
+  private answeredPlayers = new Map<string, Set<string>>(); // gameId -> Set of playerIds who answered current question
 
   constructor(private readonly gameService: GameService) {
     // Start heartbeat mechanism
@@ -511,6 +518,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
+      // Clear answered players when question changes
+      if (data.questionIndex !== undefined) {
+        this.answeredPlayers.delete(data.gameId);
+      }
+
       // Broadcast game state change to all players in the room
       this.server.to(this.getRoomName(data.gameId)).emit('GAME_STATE_UPDATED', {
         gameId: data.gameId,
@@ -520,6 +532,53 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     } catch (error) {
       this.logger.error('Error updating game state:', error);
       client.emit('ERROR', { message: 'Failed to update game state' });
+    }
+  }
+
+  @SubscribeMessage('PLAYER_ANSWERED_QUESTION')
+  async handlePlayerAnsweredQuestion(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: PlayerAnsweredData,
+  ) {
+    try {
+      this.logger.log(
+        `Player ${data.playerId} answered question ${data.questionId} in game ${data.gameId}`,
+      );
+
+      // Add player to answered set for this game
+      if (!this.answeredPlayers.has(data.gameId)) {
+        this.answeredPlayers.set(data.gameId, new Set());
+      }
+      this.answeredPlayers.get(data.gameId)!.add(data.playerId);
+
+      // Get total players in the game
+      const totalPlayers = await this.gameService.getGamePlayers(data.gameId);
+      const answeredCount = this.answeredPlayers.get(data.gameId)!.size;
+
+      // Broadcast updated answer count to all players in the room
+      this.server
+        .to(this.getRoomName(data.gameId))
+        .emit('ANSWER_COUNT_UPDATED', {
+          gameId: data.gameId,
+          questionId: data.questionId,
+          answeredCount,
+          totalPlayers: totalPlayers.length,
+        });
+
+      // Check if all players have answered
+      if (answeredCount >= totalPlayers.length) {
+        this.logger.log(
+          `All players have answered question ${data.questionId} in game ${data.gameId}. Transitioning to leaderboard.`,
+        );
+
+        // Automatically transition to leaderboard screen
+        await this.updateGameScreen(data.gameId, 'leaderboard');
+      }
+    } catch (error) {
+      this.logger.error('Error handling player answered question:', error);
+      client.emit('ERROR', {
+        message: 'Failed to process answer notification',
+      });
     }
   }
 
@@ -541,6 +600,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const success = await this.gameService.updateGameScreen(gameId, screen);
       if (success) {
+        // Clear answered players when transitioning to quiz screen
+        if (screen === 'quiz') {
+          this.answeredPlayers.delete(gameId);
+        }
+
         this.server.to(this.getRoomName(gameId)).emit('SCREEN_UPDATED', {
           gameId,
           screen,
