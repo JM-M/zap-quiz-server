@@ -60,7 +60,7 @@ interface CountdownTickData {
 
 interface UpdateScreenData {
   gameId: string;
-  screen: 'countdown' | 'quiz' | 'leaderboard';
+  screen: 'countdown' | 'quiz' | 'leaderboard' | 'scores';
 }
 
 interface UpdateQuestionIndexData {
@@ -70,7 +70,7 @@ interface UpdateQuestionIndexData {
 
 interface UpdateGameStateData {
   gameId: string;
-  screen: 'countdown' | 'quiz' | 'leaderboard';
+  screen: 'countdown' | 'quiz' | 'leaderboard' | 'scores';
   questionIndex: number;
 }
 
@@ -78,6 +78,11 @@ interface PlayerAnsweredData {
   gameId: string;
   playerId: string;
   questionId: string;
+}
+
+interface GameCompletedData {
+  gameId: string;
+  gameCode: string;
 }
 
 @WebSocketGateway({
@@ -582,6 +587,29 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('GAME_COMPLETED')
+  async handleGameCompleted(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: GameCompletedData,
+  ) {
+    try {
+      this.logger.log(
+        `Game ${data.gameId} completed, broadcasting to all players`,
+      );
+
+      // Broadcast game completion to all players in the room
+      this.server.to(this.getRoomName(data.gameId)).emit('GAME_COMPLETED', {
+        gameId: data.gameId,
+        gameCode: data.gameCode,
+      });
+    } catch (error) {
+      this.logger.error('Error handling game completion:', error);
+      client.emit('ERROR', {
+        message: 'Failed to process game completion',
+      });
+    }
+  }
+
   // Helper method to get room name
   private getRoomName(gameId: string): string {
     return `game-${gameId}`;
@@ -595,7 +623,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Helper method to update game screen (used internally)
   private async updateGameScreen(
     gameId: string,
-    screen: 'countdown' | 'quiz' | 'leaderboard',
+    screen: 'countdown' | 'quiz' | 'leaderboard' | 'scores',
   ) {
     try {
       const success = await this.gameService.updateGameScreen(gameId, screen);
