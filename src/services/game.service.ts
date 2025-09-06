@@ -20,6 +20,8 @@ export interface Game {
   updatedAt: Date;
   startedAt?: Date;
   completedAt?: Date;
+  currentScreen: 'countdown' | 'quiz' | 'leaderboard';
+  currentQuestionIndex: number;
   settings?: {
     timeLimit?: number;
     allowLateJoins?: boolean;
@@ -76,6 +78,11 @@ export class GameService {
         updatedAt: game.updatedAt,
         startedAt: game.startedAt || undefined,
         completedAt: game.completedAt || undefined,
+        currentScreen: game.currentScreen as
+          | 'countdown'
+          | 'quiz'
+          | 'leaderboard',
+        currentQuestionIndex: game.currentQuestionIndex,
         settings: game.settings || undefined,
       };
     } catch (error) {
@@ -180,9 +187,9 @@ export class GameService {
       //     leftAt: new Date(),
       // })
       // .where(and(eq(players.id, playerId), eq(players.gameId, gameId)));
-      await db
-        .delete(players)
-        .where(and(eq(players.id, playerId), eq(players.gameId, gameId)));
+      // await db
+      //   .delete(players)
+      //   .where(and(eq(players.id, playerId), eq(players.gameId, gameId)));
 
       return true;
     } catch (error) {
@@ -320,6 +327,78 @@ export class GameService {
       return result[0].hostId === userId;
     } catch (error) {
       this.logger.error('Error checking host status:', error);
+      return false;
+    }
+  }
+
+  async updateGameScreen(
+    gameId: string,
+    screen: 'countdown' | 'quiz' | 'leaderboard',
+  ): Promise<boolean> {
+    this.logger.log(`Updating game ${gameId} screen to ${screen}`);
+
+    try {
+      await db
+        .update(games)
+        .set({
+          currentScreen: screen,
+          updatedAt: new Date(),
+        })
+        .where(eq(games.id, gameId));
+
+      return true;
+    } catch (error) {
+      this.logger.error('Error updating game screen:', error);
+      return false;
+    }
+  }
+
+  async updateGameQuestionIndex(
+    gameId: string,
+    questionIndex: number,
+  ): Promise<boolean> {
+    this.logger.log(
+      `Updating game ${gameId} question index to ${questionIndex}`,
+    );
+
+    try {
+      await db
+        .update(games)
+        .set({
+          currentQuestionIndex: questionIndex,
+          updatedAt: new Date(),
+        })
+        .where(eq(games.id, gameId));
+
+      return true;
+    } catch (error) {
+      this.logger.error('Error updating game question index:', error);
+      return false;
+    }
+  }
+
+  async updateGameState(
+    gameId: string,
+    screen: 'countdown' | 'quiz' | 'leaderboard',
+    questionIndex: number,
+  ): Promise<boolean> {
+    this.logger.log(
+      `Updating game ${gameId} state: screen=${screen}, questionIndex=${questionIndex}`,
+    );
+
+    try {
+      await db
+        .update(games)
+        .set({
+          currentScreen: screen,
+          currentQuestionIndex: questionIndex,
+          updatedAt: new Date(),
+        })
+        .where(eq(games.id, gameId));
+
+      return true;
+    } catch (error) {
+      this.logger.error('Error updating game state:', error);
       return false;
     }
   }

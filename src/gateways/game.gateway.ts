@@ -58,6 +58,22 @@ interface CountdownTickData {
   remainingTime: number; // milliseconds remaining
 }
 
+interface UpdateScreenData {
+  gameId: string;
+  screen: 'countdown' | 'quiz' | 'leaderboard';
+}
+
+interface UpdateQuestionIndexData {
+  gameId: string;
+  questionIndex: number;
+}
+
+interface UpdateGameStateData {
+  gameId: string;
+  screen: 'countdown' | 'quiz' | 'leaderboard';
+  questionIndex: number;
+}
+
 @WebSocketGateway({
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
@@ -408,6 +424,103 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       clientData.lastPing = Date.now();
     }
     client.emit('PONG');
+  }
+
+  @SubscribeMessage('UPDATE_SCREEN')
+  async handleUpdateScreen(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: UpdateScreenData,
+  ) {
+    try {
+      this.logger.log(
+        `Updating screen for game ${data.gameId} to ${data.screen}`,
+      );
+
+      // Update screen in database
+      const success = await this.gameService.updateGameScreen(
+        data.gameId,
+        data.screen,
+      );
+      if (!success) {
+        client.emit('ERROR', { message: 'Failed to update screen' });
+        return;
+      }
+
+      // Broadcast screen change to all players in the room
+      this.server.to(this.getRoomName(data.gameId)).emit('SCREEN_UPDATED', {
+        gameId: data.gameId,
+        screen: data.screen,
+      });
+    } catch (error) {
+      this.logger.error('Error updating screen:', error);
+      client.emit('ERROR', { message: 'Failed to update screen' });
+    }
+  }
+
+  @SubscribeMessage('UPDATE_QUESTION_INDEX')
+  async handleUpdateQuestionIndex(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: UpdateQuestionIndexData,
+  ) {
+    try {
+      this.logger.log(
+        `Updating question index for game ${data.gameId} to ${data.questionIndex}`,
+      );
+
+      // Update question index in database
+      const success = await this.gameService.updateGameQuestionIndex(
+        data.gameId,
+        data.questionIndex,
+      );
+      if (!success) {
+        client.emit('ERROR', { message: 'Failed to update question index' });
+        return;
+      }
+
+      // Broadcast question index change to all players in the room
+      this.server
+        .to(this.getRoomName(data.gameId))
+        .emit('QUESTION_INDEX_UPDATED', {
+          gameId: data.gameId,
+          questionIndex: data.questionIndex,
+        });
+    } catch (error) {
+      this.logger.error('Error updating question index:', error);
+      client.emit('ERROR', { message: 'Failed to update question index' });
+    }
+  }
+
+  @SubscribeMessage('UPDATE_GAME_STATE')
+  async handleUpdateGameState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: UpdateGameStateData,
+  ) {
+    try {
+      this.logger.log(
+        `Updating game state for game ${data.gameId}: screen=${data.screen}, questionIndex=${data.questionIndex}`,
+      );
+
+      // Update game state in database
+      const success = await this.gameService.updateGameState(
+        data.gameId,
+        data.screen,
+        data.questionIndex,
+      );
+      if (!success) {
+        client.emit('ERROR', { message: 'Failed to update game state' });
+        return;
+      }
+
+      // Broadcast game state change to all players in the room
+      this.server.to(this.getRoomName(data.gameId)).emit('GAME_STATE_UPDATED', {
+        gameId: data.gameId,
+        screen: data.screen,
+        questionIndex: data.questionIndex,
+      });
+    } catch (error) {
+      this.logger.error('Error updating game state:', error);
+      client.emit('ERROR', { message: 'Failed to update game state' });
+    }
   }
 
   // Helper method to get room name

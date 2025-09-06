@@ -31,6 +31,14 @@ export const games = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
+    currentScreen: text('current_screen', {
+      enum: ['countdown', 'quiz', 'leaderboard'],
+    })
+      .notNull()
+      .default('countdown'),
+    currentQuestionIndex: integer('current_question_index')
+      .notNull()
+      .default(0),
     settings: jsonb('settings').$type<{
       timeLimit?: number;
       allowLateJoins?: boolean;
