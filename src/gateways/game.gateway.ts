@@ -533,6 +533,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(this.getRoomName(gameId)).emit(event, data);
   }
 
+  // Helper method to update game screen (used internally)
+  private async updateGameScreen(
+    gameId: string,
+    screen: 'countdown' | 'quiz' | 'leaderboard',
+  ) {
+    try {
+      const success = await this.gameService.updateGameScreen(gameId, screen);
+      if (success) {
+        this.server.to(this.getRoomName(gameId)).emit('SCREEN_UPDATED', {
+          gameId,
+          screen,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Error updating game screen:', error);
+    }
+  }
+
   // Helper method to get connected players in a game
   public getConnectedPlayers(gameId: string): string[] {
     try {
@@ -572,10 +590,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const currentNumber = Math.ceil(remainingTime / 1000);
 
       if (remainingTime <= 0) {
-        // Countdown finished
+        // Countdown finished - automatically transition to quiz screen
         this.server.to(this.getRoomName(gameId)).emit('COUNTDOWN_END', {
           gameId,
         });
+
+        // Automatically update screen to quiz when countdown ends
+        this.updateGameScreen(gameId, 'quiz');
+
         this.clearCountdown(gameId);
         return;
       }
